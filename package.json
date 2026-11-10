@@ -1,0 +1,40 @@
+{
+  "name": "task-management-backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node src/server.js",
+    "dev": "nodemon src/server.js",
+    "seed": "node src/utils/seedSuperAdmin.js",
+    "test": "node --test --test-concurrency=1 tests/",
+    "migrate:org": "node src/scripts/migrateOrgMembership.js",
+    "google:token": "node src/scripts/getGoogleRefreshToken.js"
+  },
+  "dependencies": {
+    "@huggingface/transformers": "^3.7.5",
+    "bcryptjs": "^2.4.3",
+    "cloudinary": "^2.11.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "ffmpeg-static": "^5.2.0",
+    "googleapis": "^178.0.0",
+    "imapflow": "^1.7.8",
+    "jsonwebtoken": "^9.0.2",
+    "luxon": "^3.7.2",
+    "mailparser": "^3.14.2",
+    "mongoose": "^8.18.1",
+    "morgan": "^1.10.0",
+    "multer": "^2.4.0",
+    "node-cron": "^4.6.0",
+    "nodemailer": "^10.1.0",
+    "socket.io": "^4.8.4",
+    "socket.io-client": "^4.8.4",
+    "web-push": "^3.6.7"
+  },
+  "devDependencies": {
+    "mongodb-memory-server": "^10.4.3",
+    "nodemon": "^3.1.10"
+  }
+}

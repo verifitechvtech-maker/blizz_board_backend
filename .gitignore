@@ -1,0 +1,22 @@
+# dependencies
+node_modules/
+
+# environment files — keep only the example
+.env
+.env.*
+!.env.example
+src/config/.env
+
+# uploaded files (kept on the server / Cloudinary, not in git)
+uploads/
+
+# logs / editor / OS
+*.log
+npm-debug.log*
+.vscode/
+.idea/
+.DS_Store
+
+# AI model download cache (whisper / speaker models are fetched again on first use)
+# — root only: src/models (database models) must stay in git
+/models/

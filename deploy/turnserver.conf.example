@@ -1,0 +1,40 @@
+# coturn — TURN server for the MoM video calls (WebRTC)
+# Install (Ubuntu):   sudo apt install coturn
+# Copy this file to:  /etc/turnserver.conf   then:  sudo systemctl enable --now coturn
+#
+# backend/.env must then contain (same secret as static-auth-secret below):
+#   TURN_URLS=turn:turn.example.com:3478?transport=udp,turn:turn.example.com:3478?transport=tcp,turns:turn.example.com:5349?transport=tcp
+#   TURN_SECRET=<the long random secret below>
+#
+# Firewall: open 3478 udp+tcp, 5349 tcp, and the relay range 49152-65535 udp.
+
+listening-port=3478
+tls-listening-port=5349
+
+# Public DNS name / IP of this server
+realm=turn.example.com
+server-name=turn.example.com
+# If the server is behind NAT (cloud VMs): external-ip=<public IP>/<private IP>
+# external-ip=203.0.113.10/10.0.0.5
+
+# Short-lived passwords made by the backend (TURN REST API) — no fixed users
+use-auth-secret
+static-auth-secret=CHANGE_ME_TO_A_LONG_RANDOM_SECRET
+
+# TLS for turns: (e.g. from Let's Encrypt)
+cert=/etc/letsencrypt/live/turn.example.com/fullchain.pem
+pkey=/etc/letsencrypt/live/turn.example.com/privkey.pem
+
+min-port=49152
+max-port=65535
+
+fingerprint
+no-cli
+no-multicast-peers
+# never relay into private networks (stops misuse of the relay)
+denied-peer-ip=10.0.0.0-10.255.255.255
+denied-peer-ip=172.16.0.0-172.31.255.255
+denied-peer-ip=192.168.0.0-192.168.255.255
+denied-peer-ip=127.0.0.0-127.255.255.255
+total-quota=200
+user-quota=12

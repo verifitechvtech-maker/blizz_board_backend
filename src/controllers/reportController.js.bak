@@ -1,0 +1,491 @@
+import Task from "../models/Task.js";
+import Report from "../models/Report.js";
+import { getDateFilter } from "../utils/dateRange.js";
+
+/* ============================================================
+   SCOPE / DATA ISOLATION
+   Non-superadmins only see tasks from their own admin_id.
+   🔍 Debug log prints to backend terminal — remove later.
+============================================================ */
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+const getScopeFilter = (req = {}) => {
+  const role = req?.user?.role || req?.scope?.role || "";
+
+  // superadmin sees everything
+  if (role === "superadmin") return {};
+
+  const adminId =
+    req?.scope?.admin_id ??
+    req?.scope?.adminId ??
+    req?.adminScope?.admin_id ??
+    req?.adminScope?.adminId ??
+    req?.dataScope?.admin_id ??
+    req?.admin_id ??
+    req?.adminId ??
+    req?.user?.admin_id ??
+    req?.user?.adminId ??
+    null;
+
+  // 🔍 TEMP DEBUG — watch backend terminal, delete once confirmed
+  console.log("🔍 [reports] scope →", {
+    role,
+    adminId,
+    scopeKeys: req?.scope ? Object.keys(req.scope) : null,
+    userKeys: req?.user ? Object.keys(req.user) : null,
+  });
+
+  return adminId ? { admin_id: adminId } : {};
+};
+
+/* ============================================================
+   FILTERS (from frontend dropdowns)
+============================================================ */
+const buildMatchQuery = (query = {}) => {
+  const {
+    dateRange = "All time",
+    department = "All Departments",
+    referenceId = "All Reference IDs",
+    search = "",
+  } = query;
+
+  const match = {};
+
+  const dateFilter = getDateFilter(dateRange);
+  if (dateFilter) match.createdAt = dateFilter;
+
+  if (referenceId && referenceId !== "All Reference IDs") {
+    match.referenceId = referenceId.trim();
+  }
+
+  const departmentConditions = [];
+
+  if (department && department !== "All Departments") {
+    departmentConditions.push({ department });
+  }
+
+  if (search && search.trim()) {
+    departmentConditions.push({
+      department: { $regex: search.trim(), $options: "i" },
+    });
+  }
+
+  if (departmentConditions.length === 1) {
+    match.department = departmentConditions[0].department;
+  } else if (departmentConditions.length === 2) {
+    match.$and = departmentConditions;
+  } else {
+    // skip tasks that have no department at all
+    match.department = { $exists: true, $ne: "" };
+  }
+
+  return match;
+};
+
+/* ============================================================
+   STATUS COUNTS — matched to YOUR Task.js schema:
+   status: "To Do" | "In Progress" | "Review" | "Completed"
+   NO completionType field → Early/OnTime/Late computed
+   from completedAt vs dueDate. NO "Overdue" status → computed.
+============================================================ */
+const STATUS_COUNTS = {
+  total: { $sum: 1 },
+
+  completed: {
+    $sum: { $cond: [{ $eq: ["$status", "Completed"] }, 1, 0] },
+  },
+
+  // completed BEFORE the due date
+  early: {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $eq: ["$status", "Completed"] },
+            { $ne: ["$completedAt", null] },
+            { $ne: ["$dueDate", null] },
+            { $lt: ["$completedAt", "$dueDate"] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  },
+
+  // completed same day as due (or unknown dates)
+  onTime: {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $eq: ["$status", "Completed"] },
+            {
+              $or: [
+                { $eq: ["$completedAt", null] },
+                { $eq: ["$dueDate", null] },
+                {
+                  $and: [
+                    { $gte: ["$completedAt", "$dueDate"] },
+                    { $lt: ["$completedAt", { $add: ["$dueDate", DAY_MS] }] },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  },
+
+  // completed more than 1 day after due
+  late: {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $eq: ["$status", "Completed"] },
+            { $ne: ["$completedAt", null] },
+            { $ne: ["$dueDate", null] },
+            { $gte: ["$completedAt", { $add: ["$dueDate", DAY_MS] }] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  },
+
+  review: { $sum: { $cond: [{ $eq: ["$status", "Review"] }, 1, 0] } },
+  progress: { $sum: { $cond: [{ $eq: ["$status", "In Progress"] }, 1, 0] } },
+
+  // your schema: "To Do" (not "Pending")
+  pending: { $sum: { $cond: [{ $eq: ["$status", "To Do"] }, 1, 0] } },
+
+  // Overdue = past due date AND not completed (uses $$NOW, always current)
+  overdue: {
+    $sum: {
+      $cond: [
+        {
+          $and: [
+            { $ne: ["$status", "Completed"] },
+            { $ne: ["$dueDate", null] },
+            { $lt: [{ $add: ["$dueDate", DAY_MS] }, "$$NOW"] },
+          ],
+        },
+        1,
+        0,
+      ],
+    },
+  },
+};
+
+const DEPARTMENT_PROJECTION = {
+  _id: 0,
+  name: "$_id",
+  total: 1,
+  completed: 1,
+  early: 1,
+  onTime: 1,
+  late: 1,
+  review: 1,
+  progress: 1,
+  pending: 1,
+  overdue: 1,
+};
+
+const EMPTY_TOTALS = {
+  total: 0,
+  completed: 0,
+  early: 0,
+  onTime: 0,
+  late: 0,
+  review: 0,
+  progress: 0,
+  pending: 0,
+  overdue: 0,
+};
+
+// your schema: 4 priority levels
+const PRIORITY_LEVELS = ["Low", "Medium", "High", "Critical"];
+
+const getDepartmentsBreakdown = (match) =>
+  Task.aggregate([
+    { $match: match },
+    { $group: { _id: "$department", ...STATUS_COUNTS } },
+    { $project: DEPARTMENT_PROJECTION },
+    { $sort: { total: -1, name: 1 } },
+  ]);
+
+const getPrioritiesBreakdown = async (match, grandTotal) => {
+  const results = await Task.aggregate([
+    { $match: match },
+    { $group: { _id: "$priority", count: { $sum: 1 } } },
+  ]);
+
+  return PRIORITY_LEVELS.map((name) => {
+    const found = results.find((p) => p._id === name);
+    const count = found ? found.count : 0;
+    return {
+      name,
+      count,
+      value: grandTotal > 0 ? Math.round((count / grandTotal) * 100) : 0,
+    };
+  });
+};
+
+const computeTotals = (departments) =>
+  departments.reduce(
+    (acc, d) => {
+      Object.keys(EMPTY_TOTALS).forEach((key) => {
+        acc[key] += d[key];
+      });
+      return acc;
+    },
+    { ...EMPTY_TOTALS }
+  );
+
+/* ============================================================
+   GET /api/reports/summary
+============================================================ */
+const getReportSummary = async (req, res) => {
+  try {
+    const { reportType = "Task Summary" } = req.query;
+    const match = { ...getScopeFilter(req), ...buildMatchQuery(req.query) };
+
+    const departments = await getDepartmentsBreakdown(match);
+    const totals = computeTotals(departments);
+
+    const completionRate =
+      totals.total > 0
+        ? Math.round((totals.completed / totals.total) * 100)
+        : 0;
+
+    const priorities = await getPrioritiesBreakdown(match, totals.total);
+
+    res.status(200).json({
+      success: true,
+      data: {
+        reportType,
+        generatedAt: new Date().toISOString(),
+        totals,
+        completionRate,
+        activeTasks: totals.progress + totals.review,
+        pendingTasks: totals.pending,
+        overdueTasks: totals.overdue,
+        departments,
+        priorities,
+      },
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to generate report",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================================================
+   GET /api/reports/export (CSV)
+============================================================ */
+const exportReportCSV = async (req, res) => {
+  try {
+    const match = { ...getScopeFilter(req), ...buildMatchQuery(req.query) };
+    const rows = await getDepartmentsBreakdown(match);
+
+    const headers = [
+      "Department",
+      "Total Tasks",
+      "Completed",
+      "Early Completion",
+      "On-time Completion",
+      "Late Completion",
+      "Review",
+      "In Progress",
+      "Pending",
+      "Overdue",
+    ];
+
+    const escapeCsv = (value) => {
+      const str = String(value ?? "");
+      return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+    };
+
+    const csv = [
+      headers.join(","),
+      ...rows.map((r) =>
+        [
+          r.name,
+          r.total,
+          r.completed,
+          r.early,
+          r.onTime,
+          r.late,
+          r.review,
+          r.progress,
+          r.pending,
+          r.overdue,
+        ]
+          .map(escapeCsv)
+          .join(",")
+      ),
+    ].join("\n");
+
+    res.setHeader("Content-Type", "text/csv;charset=utf-8;");
+    res.setHeader(
+      "Content-Disposition",
+      'attachment; filename="task-report.csv"'
+    );
+    res.status(200).send(csv);
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to export report",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================================================
+   POST /api/reports/save
+============================================================ */
+const saveReport = async (req, res) => {
+  try {
+    const {
+      reportType = "Task Summary",
+      dateRange = "All time",
+      department = "All Departments",
+      referenceId = "All Reference IDs",
+      search = "",
+    } = req.body;
+
+    const match = {
+      ...getScopeFilter(req),
+      ...buildMatchQuery({ dateRange, department, referenceId, search }),
+    };
+
+    const departments = await getDepartmentsBreakdown(match);
+    const totals = computeTotals(departments);
+
+    const completionRate =
+      totals.total > 0
+        ? Math.round((totals.completed / totals.total) * 100)
+        : 0;
+
+    const priorities = await getPrioritiesBreakdown(match, totals.total);
+
+    const report = await Report.create({
+      reportType,
+      dateRange,
+      department,
+      referenceId,
+      totals,
+      completionRate,
+      departments,
+      priorities,
+      generatedBy: req.user?._id || null,
+    });
+
+    res.status(201).json({
+      success: true,
+      message: "Report saved successfully",
+      data: report,
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to save report",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================================================
+   GET /api/reports/history
+   Non-superadmins only see their own saved reports
+============================================================ */
+const getSavedReports = async (req, res) => {
+  try {
+    const query = {};
+
+    if ((req?.user?.role || "") !== "superadmin") {
+      query.generatedBy = req.user._id;
+    }
+
+    const reports = await Report.find(query)
+      .sort({ createdAt: -1 })
+      .limit(50)
+      .populate("generatedBy", "name email");
+
+    res.status(200).json({ success: true, data: reports });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch saved reports",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================================================
+   GET /api/reports/history/:id
+============================================================ */
+const getReportById = async (req, res) => {
+  try {
+    const report = await Report.findById(req.params.id).populate(
+      "generatedBy",
+      "name email"
+    );
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found",
+      });
+    }
+
+    res.status(200).json({ success: true, data: report });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to fetch report",
+      error: error.message,
+    });
+  }
+};
+
+/* ============================================================
+   DELETE /api/reports/history/:id
+============================================================ */
+const deleteSavedReport = async (req, res) => {
+  try {
+    const report = await Report.findByIdAndDelete(req.params.id);
+
+    if (!report) {
+      return res.status(404).json({
+        success: false,
+        message: "Report not found",
+      });
+    }
+
+    res.status(200).json({ success: true, message: "Report deleted" });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: "Failed to delete report",
+      error: error.message,
+    });
+  }
+};
+
+export {
+  getReportSummary,
+  exportReportCSV,
+  saveReport,
+  getSavedReports,
+  getReportById,
+  deleteSavedReport,
+};

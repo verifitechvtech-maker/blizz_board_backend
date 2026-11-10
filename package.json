@@ -7,7 +7,7 @@
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
     "seed": "node src/utils/seedSuperAdmin.js",
-    "test": "node --test --test-concurrency=1 tests/",
+    "test": "node --test --test-concurrency=1 tests/*.test.js",
     "migrate:org": "node src/scripts/migrateOrgMembership.js",
     "google:token": "node src/scripts/getGoogleRefreshToken.js"
   },
@@ -36,5 +36,8 @@
   "devDependencies": {
     "mongodb-memory-server": "^10.4.3",
     "nodemon": "^3.1.10"
+  },
+  "engines": {
+    "node": ">=20"
   }
 }

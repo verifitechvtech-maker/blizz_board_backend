@@ -7,7 +7,8 @@ import path from "path";
 
 process.env.JWT_SECRET = "test-secret-only-for-tests";
 // Never talk to the real Google account / mailbox from tests (.env would load them)
-for (const k of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "SMTP_USER", "SMTP_PASS"]) process.env[k] = "";
+// real services from .env (email, Cloudinary, task inbox, Render flags) are never used by tests
+for (const k of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "SMTP_USER", "SMTP_PASS", "CLOUDINARY_URL", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "TASK_INBOX_ENABLED", "RENDER"]) process.env[k] = "";
 process.env.NODE_ENV = "test";
 // Throwaway push keys (dotenv never overrides these), pushes go to a fake sender below
 {

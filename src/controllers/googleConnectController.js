@@ -5,6 +5,7 @@ import { google } from "googleapis";
 import { setEnvValue } from "../utils/envFile.js";
 import { resetGoogleStatusCache } from "../services/googleCalendarService.js";
 import { frontendUrl } from "../services/accountEmailService.js";
+import { backendUrl } from "../config/urls.js";
 
 const SCOPES = [
   "https://www.googleapis.com/auth/calendar.events",
@@ -15,7 +16,7 @@ const pendingStates = new Map(); // state → { userId, at }
 
 // Must exactly match an "Authorized redirect URI" of the OAuth client in Google Cloud
 export const redirectUri = () =>
-  process.env.GOOGLE_REDIRECT_URI || `http://localhost:${process.env.PORT || 5000}/oauth2callback`;
+  process.env.GOOGLE_REDIRECT_URI || `${backendUrl()}/oauth2callback`;
 
 const client = () =>
   new google.auth.OAuth2(process.env.GOOGLE_CLIENT_ID, process.env.GOOGLE_CLIENT_SECRET, redirectUri());

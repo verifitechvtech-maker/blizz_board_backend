@@ -35,11 +35,15 @@ import { attachPermissions, permissionByMethod, requirePermission } from "./midd
 import { registerChatSocket } from "./socket/Chatsocket.js";
 import { setRealtimeIO } from "./socket/realtime.js";
 import { registerMeetingSocket } from "./socket/meetingSocket.js";
+import { PRODUCTION_FRONTEND_URL } from "./config/urls.js";
 
 dotenv.config();
 
 export const app = express();
 export const server = http.createServer(app);
+
+// Render (and most hosts) put a proxy in front: trust it so req.ip / https are the real ones
+app.set("trust proxy", 1);
 
 // ⭐ Required for ESM — used to resolve the uploads directory path
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -50,6 +54,7 @@ const allowedOrigins = [
   ...new Set(
     [
       process.env.FRONTEND_URL,
+      PRODUCTION_FRONTEND_URL, // https://blizz-board-frontend.vercel.app
       ...String(process.env.CORS_ORIGINS || "").split(","),
       "http://localhost:3000",
       "http://localhost:5173",

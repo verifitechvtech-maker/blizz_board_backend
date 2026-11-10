@@ -1,6 +1,7 @@
 // Account emails: verification (with one-time password reveal link) and
 // forgot-password notifications to the responsible administrator.
 import nodemailer from "nodemailer";
+import { frontendUrl as appFrontendUrl } from "../config/urls.js";
 
 const isTest = process.env.NODE_ENV === "test";
 
@@ -25,8 +26,8 @@ const getTransporter = () => {
   return transporter;
 };
 
-export const frontendUrl = () =>
-  (process.env.FRONTEND_URL || "http://localhost:5173").replace(/\/$/, "");
+// FRONTEND_URL, or the Vercel address in production (src/config/urls.js)
+export const frontendUrl = () => appFrontendUrl();
 
 export const escapeHtml = (value = "") =>
   String(value).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);

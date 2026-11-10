@@ -4,7 +4,8 @@ import { test, before, after, describe } from "node:test";
 import assert from "node:assert/strict";
 
 process.env.JWT_SECRET = "test-secret-only-for-tests";
-for (const k of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "SMTP_USER", "SMTP_PASS", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY"]) process.env[k] = "";
+// real services from .env (email, Cloudinary, task inbox, Render flags) are never used by tests
+for (const k of ["GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "GOOGLE_REFRESH_TOKEN", "SMTP_USER", "SMTP_PASS", "VAPID_PUBLIC_KEY", "VAPID_PRIVATE_KEY", "CLOUDINARY_URL", "CLOUDINARY_CLOUD_NAME", "CLOUDINARY_API_KEY", "CLOUDINARY_API_SECRET", "TASK_INBOX_ENABLED", "RENDER"]) process.env[k] = "";
 process.env.NODE_ENV = "test";
 process.env.TELEGRAM_BOT_TOKEN = "123:fake";
 

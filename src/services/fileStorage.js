@@ -26,15 +26,18 @@ export const cloudEnabled = () => {
   const { CLOUDINARY_URL, CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, CLOUDINARY_API_SECRET } = process.env;
   const ok = Boolean(CLOUDINARY_URL || (CLOUDINARY_CLOUD_NAME && CLOUDINARY_API_KEY && CLOUDINARY_API_SECRET));
   if (ok && !configured) {
-    // CLOUDINARY_URL is read by the SDK itself; the separate keys are passed explicitly
-    if (!CLOUDINARY_URL) {
-      cloudinary.config({
-        cloud_name: CLOUDINARY_CLOUD_NAME,
-        api_key: CLOUDINARY_API_KEY,
-        api_secret: CLOUDINARY_API_SECRET,
-      });
+    // Always pass the keys explicitly: the SDK reads CLOUDINARY_URL only when it is first
+    // imported, which happens before .env is loaded.
+    let keys = { cloud_name: CLOUDINARY_CLOUD_NAME, api_key: CLOUDINARY_API_KEY, api_secret: CLOUDINARY_API_SECRET };
+    if (CLOUDINARY_URL) {
+      const url = new URL(CLOUDINARY_URL.trim()); // cloudinary://<api_key>:<api_secret>@<cloud_name>
+      keys = {
+        cloud_name: url.hostname,
+        api_key: decodeURIComponent(url.username),
+        api_secret: decodeURIComponent(url.password),
+      };
     }
-    cloudinary.config({ secure: true });
+    cloudinary.config({ ...keys, secure: true });
     configured = true;
   }
   return ok;
@@ -65,7 +68,8 @@ export const pushFileToCloud = async (localPath, folder, filename = path.basenam
  * (502) and nothing is left behind, so no record ever points at a missing file.
  */
 export const pushUploadsToCloud = (folder) => async (req, res, next) => {
-  const files = [...(req.files || []), ...(req.file ? [req.file] : [])];
+  // only files multer saved to disk — in-memory uploads (CSV imports) are read, never stored
+  const files = [...(req.files || []), ...(req.file ? [req.file] : [])].filter((f) => f.path);
   if (!files.length || !cloudEnabled()) return next();
 
   const results = await Promise.allSettled(files.map((f) => pushFileToCloud(f.path, folder, f.filename)));

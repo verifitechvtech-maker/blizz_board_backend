@@ -1,3 +1,4 @@
+import mongoose from "mongoose";
 import express from "express";
 import http from "http";
 import cors from "cors";
@@ -64,10 +65,23 @@ const allowedOrigins = [
   ),
 ];
 
+// Same decision for REST and Socket.IO. A refused origin is logged once, so a wrong
+// FRONTEND_URL is visible in the Render logs instead of failing silently in the browser.
+const refusedOrigins = new Set();
+const checkOrigin = (origin, callback) => {
+  // no Origin header = server-to-server, curl, health checks → allowed (CORS is a browser rule)
+  if (!origin || allowedOrigins.includes(origin.replace(/\/+$/, ""))) return callback(null, true);
+  if (!refusedOrigins.has(origin)) {
+    refusedOrigins.add(origin);
+    console.warn(`CORS: refused origin ${origin} — allowed: ${allowedOrigins.join(", ")}`);
+  }
+  return callback(null, false);
+};
+
 // ==================== SOCKET.IO ====================
 const io = new Server(server, {
   cors: {
-    origin: allowedOrigins,
+    origin: checkOrigin,
     methods: ["GET", "POST"],
     credentials: true,
   },
@@ -81,7 +95,7 @@ setRealtimeIO(io); // real-time notifications (task assigned, status changes, ti
 // ==================== MIDDLEWARE ====================
 app.use(
   cors({
-    origin: allowedOrigins,
+    origin: checkOrigin,
     methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
@@ -95,6 +109,20 @@ if (process.env.NODE_ENV !== "test") app.use(morgan("dev"));
 // 🔒 Task attachments are NOT served statically any more (that made every file public).
 // Download them through the authenticated, scope-checked endpoint:
 //   GET /api/tasks/attachments/:filename
+
+// ==================== HEALTH ====================
+// Cheap and public: the login page calls it to wake a sleeping Render instance while the
+// user types, and it reports whether MongoDB is connected (1 = connected).
+app.get("/api/health", (req, res) => {
+  const db = mongoose.connection.readyState;
+  res.set("Cache-Control", "no-store");
+  res.status(db === 1 ? 200 : 503).json({
+    success: db === 1,
+    status: db === 1 ? "ok" : "database-unavailable",
+    db,
+    uptime: Math.round(process.uptime()),
+  });
+});
 
 // ==================== PUBLIC ROUTES ====================
 app.get("/", (req, res) => {
